@@ -159,7 +159,7 @@ namespace AlpcLogger.ViewModels
         {
           if (string.IsNullOrWhiteSpace(value))
           {
-            MessagesView.Filter = EventsView.Filter = null;
+            MessagesView.Filter = null;
           }
           else
           {
@@ -189,23 +189,34 @@ namespace AlpcLogger.ViewModels
             };
             EventsView.Filter = obj =>
             {
-              var msg = (AlpcEventViewModel)obj;
-              var src = msg.ProcessName.ToLowerInvariant();
-              int negates = words.Count(w => w[0] == '-');
-
-              foreach (var text in words)
-              {
-                if (text[0] == '-' && text.Length > 2 && (src.Contains(text.Substring(1).ToLowerInvariant())))
-                  return false;
-
-                if (text[0] != '-' && src.Contains(text))
-                  return true;
-              }
-              return negates == words.Length;
+              return SearchTextEventsViewFilter(obj) &&
+              StackframeSearchEventsViewFilter(obj);
             };
           }
         }
       }
+    }
+
+    public bool SearchTextEventsViewFilter(object obj)
+    {
+      if (string.IsNullOrEmpty(_searchText))
+      {
+        return true;
+      }
+      var words = _searchText.Trim().ToLowerInvariant().Split(_separators, StringSplitOptions.RemoveEmptyEntries);
+      var msg = (AlpcEventViewModel)obj;
+      var src = msg.ProcessName.ToLowerInvariant();
+      int negates = words.Count(w => w[0] == '-');
+
+      foreach (var text in words)
+      {
+        if (text[0] == '-' && text.Length > 2 && (src.Contains(text.Substring(1).ToLowerInvariant())))
+          return false;
+
+        if (text[0] != '-' && src.Contains(text))
+          return true;
+      }
+      return negates == words.Length;
     }
 
     public class Pair<T, U>
@@ -231,61 +242,67 @@ namespace AlpcLogger.ViewModels
       {
         if (SetProperty(ref _stackframeSearchText, value))
         {
-          if (string.IsNullOrWhiteSpace(value))
+          if (!string.IsNullOrWhiteSpace(value))
           {
-            EventsView.Filter = null;
-          }
-          else
-          {
-            // ahh, such nice!
             EventsView.Filter = obj =>
             {
-              var evt = (AlpcEventViewModel)obj;
-              if (evt._stack != null)
-              {
-                var frames = evt._stack.Frames;
-
-                var pass = 0;
-                var wwords = _stackframeSearchText.Trim().ToLowerInvariant().Split(_separators, StringSplitOptions.RemoveEmptyEntries);
-                var words = wwords.Select(x => new Pair<string, bool>(x, false));
-                foreach (var frame in frames)
-                {
-                  var modName = frame.ModuleName;
-                  if (!string.IsNullOrEmpty(modName))
-                    modName = modName.ToLowerInvariant();
-                  var symName = frame.SymbolName;
-                  if (!string.IsNullOrEmpty(symName))
-                    symName = symName.ToLowerInvariant();
-                  foreach (var word in words)
-                  {
-                    if (!string.IsNullOrEmpty(modName) && modName.Contains(word.Item1) && !word.Item2)
-                    {
-                      pass++;
-                      word.Item2 = true;
-                    }
-                    if (!string.IsNullOrEmpty(symName) && symName.Contains(word.Item1) && !word.Item2)
-                    {
-                      pass++;
-                      word.Item2 = true;
-                    }
-                    if (pass >= wwords.Length)
-                    {
-                      break;
-                    }
-                  }
-                  if (pass >= wwords.Length)
-                  {
-                    break;
-                  }
-                }
-
-                return pass >= wwords.Length;
-              }
-              return false;
+              return SearchTextEventsViewFilter(obj) &&
+              StackframeSearchEventsViewFilter(obj);
             };
           }
         }
       }
+    }
+
+    public bool StackframeSearchEventsViewFilter(object obj)
+    {
+      if (string.IsNullOrEmpty(_stackframeSearchText))
+      {
+        return true;
+      }
+
+      var evt = (AlpcEventViewModel)obj;
+      if (evt._stack != null)
+      {
+        var frames = evt._stack.Frames;
+
+        var pass = 0;
+        var wwords = _stackframeSearchText.Trim().ToLowerInvariant().Split(_separators, StringSplitOptions.RemoveEmptyEntries);
+        var words = wwords.Select(x => new Pair<string, bool>(x, false));
+        foreach (var frame in frames)
+        {
+          var modName = frame.ModuleName;
+          if (!string.IsNullOrEmpty(modName))
+            modName = modName.ToLowerInvariant();
+          var symName = frame.SymbolName;
+          if (!string.IsNullOrEmpty(symName))
+            symName = symName.ToLowerInvariant();
+          foreach (var word in words)
+          {
+            if (!string.IsNullOrEmpty(modName) && modName.Contains(word.Item1) && !word.Item2)
+            {
+              pass++;
+              word.Item2 = true;
+            }
+            if (!string.IsNullOrEmpty(symName) && symName.Contains(word.Item1) && !word.Item2)
+            {
+              pass++;
+              word.Item2 = true;
+            }
+            if (pass >= wwords.Length)
+            {
+              break;
+            }
+          }
+          if (pass >= wwords.Length)
+          {
+            break;
+          }
+        }
+
+        return pass >= wwords.Length;
+      }
+      return false;
     }
 
     public string SessionState => IsRunning ? "Running" : "Stopped";
