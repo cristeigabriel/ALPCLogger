@@ -30,14 +30,15 @@ namespace AlpcLogger.ViewModels
     public int MessageId => Event.MessageId;
     public DateTime Time => Event.Time;
     public AlpcEventType Type => Event.Type;
-    private CallStack _stack;
-    public CallStack Stack => _stack ?? (_stack = BuildStack(Event.Stack));
+    public CallStack _stack;
+    public CallStack Stack => _stack ?? (_stack = BuildStack());
 
     [DllImport("dbghelp", CharSet = CharSet.Unicode, EntryPoint = "SymGetModuleBase64", ExactSpelling = true, SetLastError = true)]
     public static extern ulong SymGetModuleBase64(IntPtr hProcess, ulong dwAddr);
 
-    private CallStack BuildStack(ulong[] stack)
+    public CallStack BuildStack()
     {
+      ulong[] stack = Event.Stack;
       if (stack == null)
         return null;
 

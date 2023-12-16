@@ -18,240 +18,394 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Zodiacon.WPF;
+using System.Diagnostics;
+using System.Windows.Media.Animation;
 
-namespace AlpcLogger.ViewModels {
-	class MainViewModel : BindableBase, IDisposable {
-		ObservableCollection<AlpcMessageViewModel> _messages = new ObservableCollection<AlpcMessageViewModel>();
-		ObservableCollection<AlpcEventViewModel> _events = new ObservableCollection<AlpcEventViewModel>();
+namespace AlpcLogger.ViewModels
+{
+  internal class MainViewModel : BindableBase, IDisposable
+  {
+    private ObservableCollection<AlpcMessageViewModel> _messages = new ObservableCollection<AlpcMessageViewModel>();
+    private ObservableCollection<AlpcEventViewModel> _events = new ObservableCollection<AlpcEventViewModel>();
+    private int _lastIndex = 0;
 
-		DispatcherTimer _messagesTimer, _eventsTimer;
-		AlpcCapture _capture = new AlpcCapture();
-		public ListCollectionView MessagesView { get; }
-		public ListCollectionView EventsView { get; }
+    private DispatcherTimer _messagesTimer, _eventsTimer, _eventsStackframeBuilder;
+    private AlpcCapture _capture = new AlpcCapture();
+    public ListCollectionView MessagesView { get; }
+    public ListCollectionView EventsView { get; }
 
-		public IList<AlpcMessageViewModel> Messages => _messages;
-		public IList<AlpcEventViewModel> Events => _events;
+    public IList<AlpcMessageViewModel> Messages => _messages;
+    public IList<AlpcEventViewModel> Events => _events;
 
-		public readonly IUIServices UI;
+    public readonly IUIServices UI;
 
-		public MainViewModel(IUIServices ui) {
-			UI = ui;
+    public MainViewModel(IUIServices ui)
+    {
+      UI = ui;
 
-			Thread.CurrentThread.Priority = ThreadPriority.Highest;
+      Thread.CurrentThread.Priority = ThreadPriority.Highest;
 
-			_messagesTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
-			_messagesTimer.Tick += _timer_Tick;
-			_messagesTimer.Start();
+      _messagesTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
+      _messagesTimer.Tick += _timer_Tick;
+      _messagesTimer.Start();
 
-			_eventsTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1.5) };
-			_eventsTimer.Tick += _timer2_Tick;
-			_eventsTimer.Start();
+      _eventsTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1.5) };
+      _eventsTimer.Tick += _timer2_Tick;
+      _eventsTimer.Start();
 
-			var thread = new Thread(_capture.Start);
-			thread.IsBackground = true;
-			thread.Priority = ThreadPriority.BelowNormal;
-			thread.Start();
+      _eventsStackframeBuilder = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(200) };
+      _eventsStackframeBuilder.Tick += _timer3_Tick;
+      _eventsStackframeBuilder.Start();
 
-			MessagesView = (ListCollectionView)CollectionViewSource.GetDefaultView(Messages);
-			EventsView = (ListCollectionView)CollectionViewSource.GetDefaultView(Events);
-		}
+      var thread = new Thread(_capture.Start);
+      thread.IsBackground = true;
+      thread.Priority = ThreadPriority.BelowNormal;
+      thread.Start();
 
-		private void _timer_Tick(object sender, EventArgs e) {
-			_messagesTimer.Stop();
-			var messages = _capture.GetMessagesAndClear();
-			var count = _messages.Count;
-			foreach(var msg in messages) {
-				_messages.Add(new AlpcMessageViewModel(msg, count++));
-			}
+      MessagesView = (ListCollectionView)CollectionViewSource.GetDefaultView(Messages);
+      EventsView = (ListCollectionView)CollectionViewSource.GetDefaultView(Events);
+    }
 
-			_messagesTimer.Start();
-		}
+    private void _timer_Tick(object sender, EventArgs e)
+    {
+      _messagesTimer.Stop();
+      var messages = _capture.GetMessagesAndClear();
+      var count = _messages.Count;
+      foreach (var msg in messages)
+      {
+        _messages.Add(new AlpcMessageViewModel(msg, count++));
+      }
 
-		private void _timer2_Tick(object sender, EventArgs e) {
-			_eventsTimer.Stop();
-			var events = _capture.GetEventsAndClear();
-			var count = events.Count;
-			foreach(var evt in events)
-				_events.Add(new AlpcEventViewModel(evt, count++));
+      _messagesTimer.Start();
+    }
 
-			_eventsTimer.Start();
-		}
+    private void _timer2_Tick(object sender, EventArgs e)
+    {
+      _eventsTimer.Stop();
+      var events = _capture.GetEventsAndClear();
+      var count = events.Count;
+      foreach (var evt in events)
+        _events.Add(new AlpcEventViewModel(evt, count++));
 
-		private int _selectedTab = 1;
+      _eventsTimer.Start();
+    }
 
-		public int SelectedTab {
-			get { return _selectedTab; }
-			set {
-				if(SetProperty(ref _selectedTab, value)) {
-				}
-			}
-		}
+    private void _timer3_Tick(object sender, EventArgs e)
+    {
+      _eventsStackframeBuilder.Stop();
+      var n = 15; // events
+      if (_events.Count < (_lastIndex + n))
+      {
+        n = _events.Count - _lastIndex;
+      }
+      if (n > 0)
+      {
+        for (int i = _lastIndex; i < (_lastIndex + n); i++)
+        {
+          if (_events[i]._stack == null)
+          {
+            _events[i]._stack = _events[i].BuildStack();
+          }
+        }
+        _lastIndex += n;
+      }
 
+      _eventsStackframeBuilder.Start();
+    }
 
-		public void Dispose() {
-			_capture.Dispose();
-		}
+    private int _selectedTab = 1;
 
-		private bool _isRunning;
+    public int SelectedTab
+    {
+      get { return _selectedTab; }
+      set
+      {
+        if (SetProperty(ref _selectedTab, value))
+        {
+        }
+      }
+    }
 
-		public bool IsRunning {
-			get { return _isRunning; }
-			set {
-				if(SetProperty(ref _isRunning, value)) {
-					RaisePropertyChanged(nameof(SessionState));
-				}
-			}
-		}
+    public void Dispose()
+    {
+      _capture.Dispose();
+    }
 
-		private string _searchText;
+    private bool _isRunning;
 
-		static char[] _separators = new char[] { ';', ',' };
+    public bool IsRunning
+    {
+      get { return _isRunning; }
+      set
+      {
+        if (SetProperty(ref _isRunning, value))
+        {
+          RaisePropertyChanged(nameof(SessionState));
+        }
+      }
+    }
 
-		public string SearchText {
-			get { return _searchText; }
-			set {
-				if(SetProperty(ref _searchText, value)) {
-					if(string.IsNullOrWhiteSpace(value))
-						MessagesView.Filter = EventsView.Filter = null;
-					else {
-						var words = value.Trim().ToLowerInvariant().Split(_separators, StringSplitOptions.RemoveEmptyEntries);
-						MessagesView.Filter = obj => {
-							var msg = (AlpcMessageViewModel)obj;
-							var src = msg.SourceProcessName.ToLowerInvariant();
-							var srcPid = msg.SourceProcess.ToString();
-							var tgt = msg.TargetProcessName.ToLowerInvariant();
-							var tgtPid = msg.TargetProcess.ToString();
-							int negates = words.Count(w => w[0] == '-');
+    private string _searchText;
+    private string _stackframeSearchText;
 
-							foreach(var text in words) {
-								string negText;
-								if(text[0] == '-' && text.Length > 2 && (src.Contains(negText = text.Substring(1).ToLowerInvariant()) || tgt.Contains(negText)))
-									return false;
+    private static char[] _separators = new char[] { ';', ',' };
 
-								if(text[0] != '-' && (src.Contains(text) || tgt.Contains(text)))
-									return true;
+    public string SearchText
+    {
+      get { return _searchText; }
+      set
+      {
+        if (SetProperty(ref _searchText, value))
+        {
+          if (string.IsNullOrWhiteSpace(value))
+          {
+            MessagesView.Filter = EventsView.Filter = null;
+          }
+          else
+          {
+            var words = value.Trim().ToLowerInvariant().Split(_separators, StringSplitOptions.RemoveEmptyEntries);
+            MessagesView.Filter = obj =>
+            {
+              var msg = (AlpcMessageViewModel)obj;
+              var src = msg.SourceProcessName.ToLowerInvariant();
+              var srcPid = msg.SourceProcess.ToString();
+              var tgt = msg.TargetProcessName.ToLowerInvariant();
+              var tgtPid = msg.TargetProcess.ToString();
+              int negates = words.Count(w => w[0] == '-');
 
-								if(text[0] != '-' && (srcPid.Contains(text) || tgtPid.Contains(text)))
-									return true;
-							}
-							return negates == words.Length;
-						};
-						EventsView.Filter = obj => {
-							var msg = (AlpcEventViewModel)obj;
-							var src = msg.ProcessName.ToLowerInvariant();
-							int negates = words.Count(w => w[0] == '-');
+              foreach (var text in words)
+              {
+                string negText;
+                if (text[0] == '-' && text.Length > 2 && (src.Contains(negText = text.Substring(1).ToLowerInvariant()) || tgt.Contains(negText)))
+                  return false;
 
-							foreach(var text in words) {
-								if(text[0] == '-' && text.Length > 2 && (src.Contains(text.Substring(1).ToLowerInvariant())))
-									return false;
+                if (text[0] != '-' && (src.Contains(text) || tgt.Contains(text)))
+                  return true;
 
-								if(text[0] != '-' && src.Contains(text))
-									return true;
-							}
-							return negates == words.Length;
-						};
-					}
-				}
-			}
-		}
+                if (text[0] != '-' && (srcPid.Contains(text) || tgtPid.Contains(text)))
+                  return true;
+              }
+              return negates == words.Length;
+            };
+            EventsView.Filter = obj =>
+            {
+              var msg = (AlpcEventViewModel)obj;
+              var src = msg.ProcessName.ToLowerInvariant();
+              int negates = words.Count(w => w[0] == '-');
 
-		public string SessionState => IsRunning ? "Running" : "Stopped";
+              foreach (var text in words)
+              {
+                if (text[0] == '-' && text.Length > 2 && (src.Contains(text.Substring(1).ToLowerInvariant())))
+                  return false;
 
-		public ICommand ExitCommand => new DelegateCommand(() => {
-			Dispose();
-			Application.Current.MainWindow.Close();
-		});
+                if (text[0] != '-' && src.Contains(text))
+                  return true;
+              }
+              return negates == words.Length;
+            };
+          }
+        }
+      }
+    }
 
-		public DelegateCommandBase StartCommand => new DelegateCommand(() => {
-			_capture.Run();
-			IsRunning = true;
-		}, () => !IsRunning).ObservesProperty(() => IsRunning);
+    public class Pair<T, U>
+    {
+      public Pair()
+      {
+      }
 
-		public DelegateCommandBase StopCommand => new DelegateCommand(() => {
-			_capture.Pause();
-			IsRunning = false;
-		}, () => IsRunning).ObservesProperty(() => IsRunning);
+      public Pair(T first, U second)
+      {
+        this.Item1 = first;
+        this.Item2 = second;
+      }
 
-		public ICommand FindChainsCommand => new DelegateCommand(() => {
-			var finder = new AlpcChainsFinder(Messages.Where(m => MessagesView.PassesFilter(m)).Select(m => m.Message).ToList());
-			foreach(var chain in finder.FindAllChains()) {
-				var msg1 = chain[0];
-				var msg2 = chain[1];
-			}
+      public T Item1 { get; set; }
+      public U Item2 { get; set; }
+    };
 
-		});
+    public string StackframeSearchText
+    {
+      get { return _stackframeSearchText; }
+      set
+      {
+        if (SetProperty(ref _stackframeSearchText, value))
+        {
+          if (string.IsNullOrWhiteSpace(value))
+          {
+            EventsView.Filter = null;
+          }
+          else
+          {
+            // ahh, such nice!
+            EventsView.Filter = obj =>
+            {
+              var evt = (AlpcEventViewModel)obj;
+              if (evt._stack != null)
+              {
+                var frames = evt._stack.Frames;
 
-		public DelegateCommandBase SaveAllCommand => new DelegateCommand(() => {
-			if(Messages.Count == 0)
-				return;
+                var pass = 0;
+                var wwords = _stackframeSearchText.Trim().ToLowerInvariant().Split(_separators, StringSplitOptions.RemoveEmptyEntries);
+                var words = wwords.Select(x => new Pair<string, bool>(x, false));
+                foreach (var frame in frames)
+                {
+                  var modName = frame.ModuleName;
+                  if (!string.IsNullOrEmpty(modName))
+                    modName = modName.ToLowerInvariant();
+                  var symName = frame.SymbolName;
+                  if (!string.IsNullOrEmpty(symName))
+                    symName = symName.ToLowerInvariant();
+                  foreach (var word in words)
+                  {
+                    if (!string.IsNullOrEmpty(modName) && modName.Contains(word.Item1) && !word.Item2)
+                    {
+                      pass++;
+                      word.Item2 = true;
+                    }
+                    if (!string.IsNullOrEmpty(symName) && symName.Contains(word.Item1) && !word.Item2)
+                    {
+                      pass++;
+                      word.Item2 = true;
+                    }
+                    if (pass >= wwords.Length)
+                    {
+                      break;
+                    }
+                  }
+                  if (pass >= wwords.Length)
+                  {
+                    break;
+                  }
+                }
 
-			DoSave(true);
-		});
+                return pass >= wwords.Length;
+              }
+              return false;
+            };
+          }
+        }
+      }
+    }
 
-		private AlpcEventViewModel _selectedEvent;
+    public string SessionState => IsRunning ? "Running" : "Stopped";
 
-		public AlpcEventViewModel SelectedEvent {
-			get { return _selectedEvent; }
-			set { SetProperty(ref _selectedEvent, value); }
-		}
+    public ICommand ExitCommand => new DelegateCommand(() =>
+    {
+      Dispose();
+      Application.Current.MainWindow.Close();
+    });
 
-		public DelegateCommandBase StackCommand => new DelegateCommand(() => {
-			var stack = SelectedEvent.Stack;
-			var vm = UI.DialogService.CreateDialog<CallStackViewModel, CallStackView>(stack);
-			vm.Show();
-		}, () => SelectedEvent != null && SelectedTab == 0)
-			.ObservesProperty(() => SelectedEvent).ObservesProperty(() => SelectedTab);
+    public DelegateCommandBase StartCommand => new DelegateCommand(() =>
+    {
+      _capture.Run();
+      IsRunning = true;
+    }, () => !IsRunning).ObservesProperty(() => IsRunning);
 
-		public ICommand ClearLogCommand => new DelegateCommand(() => {
-			Messages.Clear();
-			Events.Clear();
-		});
+    public DelegateCommandBase StopCommand => new DelegateCommand(() =>
+    {
+      _capture.Pause();
+      IsRunning = false;
+    }, () => IsRunning).ObservesProperty(() => IsRunning);
 
-		public DelegateCommandBase SaveFilteredCommand => new DelegateCommand(() => {
-			if(MessagesView.Count == 0)
-				return;
+    public ICommand FindChainsCommand => new DelegateCommand(() =>
+    {
+      var finder = new AlpcChainsFinder(Messages.Where(m => MessagesView.PassesFilter(m)).Select(m => m.Message).ToList());
+      foreach (var chain in finder.FindAllChains())
+      {
+        var msg1 = chain[0];
+        var msg2 = chain[1];
+      }
+    });
 
-			DoSave(false);
-		});
+    public DelegateCommandBase SaveAllCommand => new DelegateCommand(() =>
+    {
+      if (Messages.Count == 0)
+        return;
 
-		private void DoSave(bool all) {
-			var filename = UI.FileDialogService.GetFileForSave("CSV Files (*.csv)|*.csv|All Files|*.*");
-			if(filename == null)
-				return;
+      DoSave(true);
+    });
 
-			SaveInternal(filename, all);
-		}
+    private AlpcEventViewModel _selectedEvent;
 
-		private void SaveInternal(string filename, bool all) {
-			_messagesTimer.Stop();
+    public AlpcEventViewModel SelectedEvent
+    {
+      get { return _selectedEvent; }
+      set { SetProperty(ref _selectedEvent, value); }
+    }
 
-			try {
-				var config = new Configuration {
-					IncludePrivateMembers = true,
-				};
+    public DelegateCommandBase StackCommand => new DelegateCommand(() =>
+    {
+      var stack = SelectedEvent.Stack;
+      var vm = UI.DialogService.CreateDialog<CallStackViewModel, CallStackView>(stack);
+      vm.Show();
+    }, () => SelectedEvent != null && SelectedTab == 0)
+      .ObservesProperty(() => SelectedEvent).ObservesProperty(() => SelectedTab);
 
-				using(var writer = new StreamWriter(filename)) {
-					var csvWriter = new CsvWriter(writer, config);
-					if( all ) {
-						csvWriter.WriteRecords(_messages);
-					} else {
-						csvWriter.WriteHeader<AlpcMessageViewModel>();
-						csvWriter.NextRecord();
-						foreach(var msg in _messages) {
-							if(MessagesView.Contains(msg)) {
-								csvWriter.WriteRecord(msg);
-								csvWriter.NextRecord();
-							}
-						}
-					}
-				}
-			}
-			catch (Exception ex) {
-				UI.MessageBoxService.ShowMessage(ex.Message, App.Name);
-			}
-			finally {
-				_messagesTimer.Start();
-			}
-		}
-	}
+    public ICommand ClearLogCommand => new DelegateCommand(() =>
+    {
+      Messages.Clear();
+      Events.Clear();
+    });
+
+    public DelegateCommandBase SaveFilteredCommand => new DelegateCommand(() =>
+    {
+      if (MessagesView.Count == 0)
+        return;
+
+      DoSave(false);
+    });
+
+    private void DoSave(bool all)
+    {
+      var filename = UI.FileDialogService.GetFileForSave("CSV Files (*.csv)|*.csv|All Files|*.*");
+      if (filename == null)
+        return;
+
+      SaveInternal(filename, all);
+    }
+
+    private void SaveInternal(string filename, bool all)
+    {
+      _messagesTimer.Stop();
+
+      try
+      {
+        var config = new Configuration
+        {
+          IncludePrivateMembers = true,
+        };
+
+        using (var writer = new StreamWriter(filename))
+        {
+          var csvWriter = new CsvWriter(writer, config);
+          if (all)
+          {
+            csvWriter.WriteRecords(_messages);
+          }
+          else
+          {
+            csvWriter.WriteHeader<AlpcMessageViewModel>();
+            csvWriter.NextRecord();
+            foreach (var msg in _messages)
+            {
+              if (MessagesView.Contains(msg))
+              {
+                csvWriter.WriteRecord(msg);
+                csvWriter.NextRecord();
+              }
+            }
+          }
+        }
+      }
+      catch (Exception ex)
+      {
+        UI.MessageBoxService.ShowMessage(ex.Message, App.Name);
+      }
+      finally
+      {
+        _messagesTimer.Start();
+      }
+    }
+  }
 }
