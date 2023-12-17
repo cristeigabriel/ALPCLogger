@@ -53,6 +53,9 @@ namespace AlpcLogger.ViewModels
       _eventsTimer.Tick += _timer2_Tick;
       _eventsTimer.Start();
 
+      // This timer is basically irrelevant, because in reality it's being dictated by the
+      // tick function itself. We can't determine how much generating N debug stackframes will
+      // take, so we just stop the timer and restart it once we're actually done.
       _eventsStackframeBuilder = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(200) };
       _eventsStackframeBuilder.Tick += _timer3_Tick;
       _eventsStackframeBuilder.Start();
@@ -96,7 +99,8 @@ namespace AlpcLogger.ViewModels
 
       Task.Run(() =>
       {
-        var n = 15; // events
+        Stopwatch stopwatch = Stopwatch.StartNew();
+        var n = 30; // events
         if (_events.Count < (_lastIndex + n))
         {
           n = _events.Count - _lastIndex;
@@ -112,18 +116,27 @@ namespace AlpcLogger.ViewModels
           }
           _lastIndex += n;
         }
+        stopwatch.Stop();
 
+#if DEBUG
+        var watch = stopwatch.ElapsedMilliseconds;
+#endif
         Application.Current.Dispatcher.Invoke(() =>
         {
-          EventsView.Filter = obj =>
+          // some checks for closing and other actions
+          // that may happen respectively
+          if (EventsView != null && _eventsStackframeBuilder != null &&
+          !string.IsNullOrEmpty(_stackframeSearchText))
           {
-            return SearchTextEventsViewFilter(obj) &&
-            StackframeSearchEventsViewFilter(obj);
-          };
+            EventsView.Filter = obj =>
+            {
+              return SearchTextEventsViewFilter(obj) &&
+              StackframeSearchEventsViewFilter(obj);
+            };
+          }
+          _eventsStackframeBuilder.Start();
         });
       });
-
-      _eventsStackframeBuilder.Start();
     }
 
     private int _selectedTab = 1;
