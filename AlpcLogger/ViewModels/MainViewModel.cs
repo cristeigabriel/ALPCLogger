@@ -27,7 +27,9 @@ namespace AlpcLogger.ViewModels
   {
     private ObservableCollection<AlpcMessageViewModel> _messages = new ObservableCollection<AlpcMessageViewModel>();
     private ObservableCollection<AlpcEventViewModel> _events = new ObservableCollection<AlpcEventViewModel>();
+    private ReaderWriterLockSlim _lock = new ReaderWriterLockSlim();
     private int _lastIndex = 0;
+    private int _lastIndexFocused = 0;
 
     private DispatcherTimer _messagesTimer, _eventsTimer, _eventsStackframeBuilder;
     private AlpcCapture _capture = new AlpcCapture();
@@ -87,8 +89,10 @@ namespace AlpcLogger.ViewModels
       _eventsTimer.Stop();
       var events = _capture.GetEventsAndClear();
       var count = events.Count;
+      _lock.EnterWriteLock();
       foreach (var evt in events)
         _events.Add(new AlpcEventViewModel(evt, count++));
+      _lock.ExitWriteLock();
 
       _eventsTimer.Start();
     }
@@ -99,43 +103,80 @@ namespace AlpcLogger.ViewModels
 
       Task.Run(() =>
       {
-        Stopwatch stopwatch = Stopwatch.StartNew();
-        var n = 30; // events
-        if (_events.Count < (_lastIndex + n))
+        try
         {
-          n = _events.Count - _lastIndex;
-        }
-        if (n > 0)
-        {
-          for (int i = _lastIndex; i < (_lastIndex + n); i++)
+          Stopwatch stopwatch = Stopwatch.StartNew();
+          bool Focused = !string.IsNullOrEmpty(_searchText);
+          _lock.EnterReadLock();
+          var events = Focused ? _events.Select((obj, idx) => new Pair<object, int>(obj, idx))
+              .Where(obj => SearchTextEventsViewFilter(obj.Item1))
+              .Select(obj => obj.Item2).ToList() :
+              _events.Select((obj, idx) => idx).ToList();
+          _lock.ExitReadLock();
+          ref int lastIndex = ref _lastIndex;
+          if (Focused)
           {
-            if (_events[i]._stack == null)
+            if (_searchTextFocusedPrev != _searchText)
             {
-              _events[i]._stack = _events[i].BuildStack();
+              _searchTextFocusedPrev = _searchText;
+              _lastIndexFocused = 0;
             }
+            lastIndex = ref _lastIndexFocused;
           }
-          _lastIndex += n;
-        }
-        stopwatch.Stop();
+
+          var n = 30; // events
+          if (events.Count < (lastIndex + n))
+          {
+            n = events.Count - lastIndex;
+          }
+          if (n > 0)
+          {
+            // skip situations where we already built stack
+            int j = 0;
+
+            int i = lastIndex;
+            for (; i < events.Count;)
+            {
+              _lock.EnterWriteLock();
+              if (_events[i]._stack == null)
+              {
+                _events[events[i]]._stack = _events[events[i]].BuildStack();
+                j++;
+              }
+              _lock.ExitWriteLock();
+              if (j == n)
+              {
+                break;
+              }
+              i++;
+            }
+            lastIndex += (i - lastIndex);
+          }
+          stopwatch.Stop();
 
 #if DEBUG
-        var watch = stopwatch.ElapsedMilliseconds;
+          var watch = stopwatch.ElapsedMilliseconds;
 #endif
-        Application.Current.Dispatcher.Invoke(() =>
-        {
-          // some checks for closing and other actions
-          // that may happen respectively
-          if (EventsView != null && _eventsStackframeBuilder != null &&
-          !string.IsNullOrEmpty(_stackframeSearchText))
+          Application.Current.Dispatcher.Invoke(() =>
           {
-            EventsView.Filter = obj =>
+            // some checks for closing and other actions
+            // that may happen respectively
+            if (EventsView != null)
             {
-              return SearchTextEventsViewFilter(obj) &&
-              StackframeSearchEventsViewFilter(obj);
-            };
-          }
-          _eventsStackframeBuilder.Start();
-        });
+              EventsView.Filter = obj =>
+              {
+                return SearchTextEventsViewFilter(obj) &&
+                StackframeSearchEventsViewFilter(obj);
+              };
+            }
+
+            _eventsStackframeBuilder.Start();
+          });
+        }
+        catch (Exception ex)
+        {
+          ;
+        }
       });
     }
 
@@ -172,6 +213,7 @@ namespace AlpcLogger.ViewModels
     }
 
     private string _searchText;
+    private string _searchTextFocusedPrev;
     private string _stackframeSearchText;
 
     private static char[] _separators = new char[] { ';', ',' };
