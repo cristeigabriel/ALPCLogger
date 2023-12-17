@@ -175,7 +175,7 @@ namespace AlpcLogger.ViewModels
         }
         catch (Exception ex)
         {
-          ;
+          Debugger.Break();
         }
       });
     }
