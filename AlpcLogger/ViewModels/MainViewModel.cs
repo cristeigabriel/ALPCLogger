@@ -93,22 +93,35 @@ namespace AlpcLogger.ViewModels
     private void _timer3_Tick(object sender, EventArgs e)
     {
       _eventsStackframeBuilder.Stop();
-      var n = 15; // events
-      if (_events.Count < (_lastIndex + n))
+
+      Task.Run(() =>
       {
-        n = _events.Count - _lastIndex;
-      }
-      if (n > 0)
-      {
-        for (int i = _lastIndex; i < (_lastIndex + n); i++)
+        var n = 15; // events
+        if (_events.Count < (_lastIndex + n))
         {
-          if (_events[i]._stack == null)
-          {
-            _events[i]._stack = _events[i].BuildStack();
-          }
+          n = _events.Count - _lastIndex;
         }
-        _lastIndex += n;
-      }
+        if (n > 0)
+        {
+          for (int i = _lastIndex; i < (_lastIndex + n); i++)
+          {
+            if (_events[i]._stack == null)
+            {
+              _events[i]._stack = _events[i].BuildStack();
+            }
+          }
+          _lastIndex += n;
+        }
+
+        Application.Current.Dispatcher.Invoke(() =>
+        {
+          EventsView.Filter = obj =>
+          {
+            return SearchTextEventsViewFilter(obj) &&
+            StackframeSearchEventsViewFilter(obj);
+          };
+        });
+      });
 
       _eventsStackframeBuilder.Start();
     }
