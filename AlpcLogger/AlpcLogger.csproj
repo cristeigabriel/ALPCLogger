@@ -129,6 +129,7 @@
     <Compile Include="Models\AlpcEvent.cs" />
     <Compile Include="Models\AlpcMessage.cs" />
     <Compile Include="Models\CallStack.cs" />
+    <Compile Include="Util\WindowUtils.cs" />
     <Compile Include="ViewModels\AlpcEventViewModel.cs" />
     <Compile Include="ViewModels\AlpcMessageViewModel.cs" />
     <Compile Include="ViewModels\CallStackViewModel.cs" />

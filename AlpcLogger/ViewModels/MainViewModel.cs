@@ -20,6 +20,10 @@ using System.Windows.Threading;
 using Zodiacon.WPF;
 using System.Diagnostics;
 using System.Windows.Media.Animation;
+using System.Runtime.InteropServices;
+using System.Security.Permissions;
+using Microsoft.Diagnostics.Tracing.Parsers.MicrosoftWindowsTCPIP;
+using AlpcLogger.Util;
 
 namespace AlpcLogger.ViewModels
 {
@@ -30,6 +34,7 @@ namespace AlpcLogger.ViewModels
     private ReaderWriterLockSlim _lock = new ReaderWriterLockSlim();
     private int _lastIndex = 0;
     private int _lastIndexFocused = 0;
+    private int _prevN = -1;
 
     private DispatcherTimer _messagesTimer, _eventsTimer, _eventsStackframeBuilder;
     private AlpcCapture _capture = new AlpcCapture();
@@ -69,6 +74,7 @@ namespace AlpcLogger.ViewModels
 
       MessagesView = (ListCollectionView)CollectionViewSource.GetDefaultView(Messages);
       EventsView = (ListCollectionView)CollectionViewSource.GetDefaultView(Events);
+      WindowUtils.SetState(WindowUtils.TaskbarStates.Normal);
     }
 
     private void _timer_Tick(object sender, EventArgs e)
@@ -125,9 +131,11 @@ namespace AlpcLogger.ViewModels
           }
 
           var n = 30; // events
-          if (events.Count < (lastIndex + n))
+          if (events.Count < ((lastIndex + n) - 1))
           {
             n = events.Count - lastIndex;
+            if (events.Count > 0)
+              n -= 1;
           }
           if (n > 0)
           {
@@ -144,14 +152,26 @@ namespace AlpcLogger.ViewModels
                 j++;
               }
               _lock.ExitWriteLock();
+              i++;
               if (j == n)
               {
                 break;
               }
-              i++;
             }
             lastIndex += (i - lastIndex);
           }
+          // taskbar progress and flashing
+          if (_events.Count > 0 && n == 0 && _prevN != n)
+          {
+            WindowUtils.SetValue(0, 0);
+            // TODO:
+            //WindowUtils.FlashWindow();
+          }
+          else
+          {
+            WindowUtils.SetValue((double)lastIndex, (double)events.Count);
+          }
+          _prevN = n;
           stopwatch.Stop();
 
 #if DEBUG
@@ -310,14 +330,11 @@ namespace AlpcLogger.ViewModels
       {
         if (SetProperty(ref _stackframeSearchText, value))
         {
-          if (!string.IsNullOrWhiteSpace(value))
+          EventsView.Filter = obj =>
           {
-            EventsView.Filter = obj =>
-            {
-              return SearchTextEventsViewFilter(obj) &&
-              StackframeSearchEventsViewFilter(obj);
-            };
-          }
+            return SearchTextEventsViewFilter(obj) &&
+            StackframeSearchEventsViewFilter(obj);
+          };
         }
       }
     }
@@ -430,7 +447,9 @@ namespace AlpcLogger.ViewModels
     public ICommand ClearLogCommand => new DelegateCommand(() =>
     {
       Messages.Clear();
+      _lock.EnterWriteLock();
       Events.Clear();
+      _lock.ExitWriteLock();
     });
 
     public DelegateCommandBase SaveFilteredCommand => new DelegateCommand(() =>
