@@ -449,6 +449,7 @@ namespace AlpcLogger.ViewModels
       Messages.Clear();
       _lock.EnterWriteLock();
       Events.Clear();
+      _lastIndex = _lastIndexFocused = 0;
       _lock.ExitWriteLock();
     });
 
